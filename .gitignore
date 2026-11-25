@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.state/
+*.tfplan
+.terraform/
+terraform.tfstate*
+terraform/terraform.tfstate.d/
+HANDOFF.md

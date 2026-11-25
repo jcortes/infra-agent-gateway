@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      localstack:
+        image: localstack/localstack:4  # 2026.x requires LOCALSTACK_AUTH_TOKEN
+        ports: ["4566:4566"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_wrapper: false
+      - name: Install Conftest
+        run: |
+          curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.71.1/conftest_0.71.1_Linux_x86_64.tar.gz | tar xz conftest
+          sudo mv conftest /usr/local/bin/
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm test:policy
+      - run: tofu -chdir=terraform fmt -check
+      - name: Integration (real OpenTofu + Conftest + LocalStack)
+        run: pnpm test test/integration.test.ts
+        env:
+          INTEGRATION: "1"

@@ -1,0 +1,28 @@
+{
+  "name": "infra-agent-gateway",
+  "version": "1.0.0",
+  "description": "MCP server that lets AI agents plan and apply infrastructure changes behind policy-as-code, human approval and an audit log",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "test:policy": "conftest verify --policy policy",
+    "start": "tsx src/main.ts",
+    "approve": "tsx src/cli/approve.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "packageManager": "pnpm@10.28.2",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.10",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.2"
+  },
+  "type": "module"
+}
