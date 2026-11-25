@@ -1,6 +1,6 @@
-import type { GatewayPorts, PlanArtifact, Tofu, PolicyEngine } from "../src/ports.js";
+import type { GatewayPorts, Kubernetes, PlanArtifact, Tofu, PolicyEngine } from "../src/ports.js";
 import { createMemoryAuditLog, createMemoryPlanStore } from "../src/adapters/memory.js";
-import type { ChangeIntent } from "../src/intent.js";
+import type { VmIntent } from "../src/intent.js";
 
 /**
  * Fake stand-ins for the external CLIs (OpenTofu, Conftest). The in-memory
@@ -8,12 +8,13 @@ import type { ChangeIntent } from "../src/intent.js";
  */
 export function createFakeWorld(options: { violations?: string[] } = {}) {
   const applied: string[] = [];
+  const appliedManifests: string[] = [];
   const planFiles = new Map<string, string>();
   const drift = new Map<string, string[]>();
   let counter = 0;
 
   const tofu: Tofu = {
-    async plan(intent: ChangeIntent): Promise<PlanArtifact> {
+    async plan(intent: VmIntent): Promise<PlanArtifact> {
       const planFile = `plan-${++counter}.tfplan`;
       const bytes = JSON.stringify(intent);
       planFiles.set(planFile, bytes);
@@ -36,6 +37,25 @@ export function createFakeWorld(options: { violations?: string[] } = {}) {
     },
   };
 
+  const kube: Kubernetes = {
+    async plan(intent) {
+      const planFile = `manifest-${++counter}.json`;
+      planFiles.set(planFile, JSON.stringify(intent));
+      return {
+        planFile,
+        planJson: { kind: "Deployment", intent },
+        summary: [`+ deployment/${intent.namespace}/${intent.name} (${intent.image}, ${intent.replicas} replicas)`],
+      };
+    },
+    async readPlanBytes(planFile) {
+      return planFiles.get(planFile) ?? "";
+    },
+    async apply(planFile) {
+      appliedManifests.push(planFile);
+      return { output: `deployment.apps configured: ${planFile}` };
+    },
+  };
+
   const policy: PolicyEngine = {
     async evaluate() {
       return { violations: options.violations ?? [] };
@@ -44,6 +64,7 @@ export function createFakeWorld(options: { violations?: string[] } = {}) {
 
   const ports: GatewayPorts = {
     tofu,
+    kube,
     policy,
     plans: createMemoryPlanStore(),
     audit: createMemoryAuditLog(),
@@ -53,6 +74,7 @@ export function createFakeWorld(options: { violations?: string[] } = {}) {
   return {
     ports,
     applied,
+    appliedManifests,
     /** Simulates someone changing real infrastructure by hand. */
     driftOutsideTofu(name: string, changes: string[]) {
       drift.set(name, changes);

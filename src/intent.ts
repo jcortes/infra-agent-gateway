@@ -10,4 +10,18 @@ export const vmIntent = z.object({
   sshCidr: z.string().optional(),
 });
 
-export type ChangeIntent = z.infer<typeof vmIntent>;
+/** A Deployment on Kubernetes. The gateway renders the manifest; agents never send YAML. */
+export const workloadIntent = z.object({
+  kind: z.literal("workload"),
+  name: vmIntent.shape.name,
+  namespace: z.string().regex(/^[a-z][a-z0-9-]{0,62}$/),
+  image: z.string().min(1),
+  replicas: z.number().int().min(1).max(10),
+  cpu: z.string().optional(),
+  memory: z.string().optional(),
+  privileged: z.boolean().optional(),
+});
+
+export type VmIntent = z.infer<typeof vmIntent>;
+export type WorkloadIntent = z.infer<typeof workloadIntent>;
+export type ChangeIntent = VmIntent | WorkloadIntent;

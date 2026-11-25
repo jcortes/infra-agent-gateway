@@ -20,7 +20,7 @@ describe("MCP server", () => {
 
     const { tools } = await client.listTools();
 
-    expect(tools.map((t) => t.name).sort()).toEqual(["detect_drift", "get_audit_log", "plan_change", "request_apply"]);
+    expect(tools.map((t) => t.name).sort()).toEqual(["deploy_workload", "detect_drift", "get_audit_log", "plan_change", "request_apply"]);
   });
 
   it("rejects malformed intents before anything is planned", async () => {
@@ -72,5 +72,36 @@ describe("MCP server", () => {
       changes: ["~ aws_instance.vm (t3.small)"],
     });
     expect(world.applied).toEqual(["plan-1.tfplan"]);
+  });
+
+  it("queues a compliant workload for human approval without deploying it", async () => {
+    const { client, world } = await connect();
+
+    const result = await client.callTool({
+      name: "deploy_workload",
+      arguments: { name: "web", namespace: "team-apps", image: "nginx:1.27", replicas: 2, cpu: "250m", memory: "128Mi" },
+    });
+
+    expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toMatchObject({
+      status: "pending_approval",
+      summary: ["+ deployment/team-apps/web (nginx:1.27, 2 replicas)"],
+      violations: [],
+    });
+    expect(world.appliedManifests).toEqual([]);
+  });
+
+  it("does not queue a workload that policy denied, and says why", async () => {
+    const { client, world } = await connect(createFakeWorld({ violations: ["deployment/team-apps/web: container web must not run privileged"] }));
+
+    const result = await client.callTool({
+      name: "deploy_workload",
+      arguments: { name: "web", namespace: "team-apps", image: "nginx:1.27", replicas: 1, privileged: true },
+    });
+
+    expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toMatchObject({
+      status: "denied",
+      violations: ["deployment/team-apps/web: container web must not run privileged"],
+    });
+    expect((await world.ports.audit.list()).map((e) => e.action)).toEqual(["plan_change"]);
   });
 });

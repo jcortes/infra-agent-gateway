@@ -1,15 +1,19 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { ChangeIntent } from "./intent.js";
-import type { GatewayPorts } from "./ports.js";
+import type { Backend, GatewayPorts } from "./ports.js";
 
 export function createGateway(ports: GatewayPorts) {
-  const { tofu, policy, plans, audit, now } = ports;
+  const { tofu, kube, policy, plans, audit, now } = ports;
+
+  const backendFor = (intent: ChangeIntent): Backend<ChangeIntent> =>
+    (intent.kind === "workload" ? kube : tofu) as Backend<ChangeIntent>;
 
   const sha256 = (data: string) => createHash("sha256").update(data).digest("hex");
 
   return {
     async planChange(intent: ChangeIntent, actor: string) {
-      const artifact = await tofu.plan(intent);
+      const backend = backendFor(intent);
+      const artifact = await backend.plan(intent);
       const { violations } = await policy.evaluate(artifact.planJson);
       const planId = randomUUID();
       const status = violations.length === 0 ? "planned" : "denied";
@@ -18,7 +22,7 @@ export function createGateway(ports: GatewayPorts) {
         planId,
         intent,
         planFile: artifact.planFile,
-        planHash: sha256(await tofu.readPlanBytes(artifact.planFile)),
+        planHash: sha256(await backend.readPlanBytes(artifact.planFile)),
         summary: artifact.summary,
         violations,
         status,
@@ -59,12 +63,13 @@ export function createGateway(ports: GatewayPorts) {
       if (record.status !== "pending_approval") {
         throw new Error(`Plan ${planId} is ${record.status}, not pending approval`);
       }
-      if (sha256(await tofu.readPlanBytes(record.planFile)) !== record.planHash) {
+      const backend = backendFor(record.intent);
+      if (sha256(await backend.readPlanBytes(record.planFile)) !== record.planHash) {
         await audit.append({ at: now().toISOString(), action: "approve", actor: approver, planId, outcome: "blocked_tampered" });
         throw new Error(`Plan ${planId} changed since it was reviewed; re-plan before applying`);
       }
 
-      const { output } = await tofu.apply(record.planFile);
+      const { output } = await backend.apply(record.planFile);
       record.status = "applied";
       record.appliedAt = now().toISOString();
       await plans.save(record);
@@ -76,6 +81,7 @@ export function createGateway(ports: GatewayPorts) {
     async detectDrift(name: string, actor: string) {
       const applied = await plans.latestApplied(name);
       if (!applied) throw new Error(`Nothing has been applied to ${name}, so there is no drift to detect`);
+      if (applied.intent.kind !== "vm") throw new Error(`${name} is a workload; drift detection covers VMs only`);
       const { drifted, changes } = await tofu.detectDrift(applied.intent);
       await audit.append({
         at: now().toISOString(),

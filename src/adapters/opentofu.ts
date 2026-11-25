@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { ChangeIntent } from "../intent.js";
+import type { VmIntent } from "../intent.js";
 import type { PlanArtifact, Tofu } from "../ports.js";
 import { exec } from "./exec.js";
 
@@ -20,7 +20,7 @@ export function createOpenTofu(options: { moduleDir: string; planDir: string; aw
     await tofu(["workspace", "select", "-or-create", name]);
   };
 
-  const varArgs = (intent: ChangeIntent) => {
+  const varArgs = (intent: VmIntent) => {
     const vars: Record<string, string | undefined> = {
       name: intent.name,
       environment: intent.environment,
@@ -37,7 +37,7 @@ export function createOpenTofu(options: { moduleDir: string; planDir: string; aw
   };
 
   /** Saves a plan to `planFile`; returns its JSON, its changes and tofu's exit code. */
-  const savePlan = async (intent: ChangeIntent, planFile: string, extraArgs: string[] = []) => {
+  const savePlan = async (intent: VmIntent, planFile: string, extraArgs: string[] = []) => {
     await selectWorkspace(intent.name);
     await mkdir(path.dirname(planFile), { recursive: true });
     const { code } = await tofu(["plan", "-input=false", "-no-color", `-out=${planFile}`, ...extraArgs, ...varArgs(intent)], [2]);
@@ -54,7 +54,7 @@ export function createOpenTofu(options: { moduleDir: string; planDir: string; aw
   };
 
   return {
-    async plan(intent: ChangeIntent): Promise<PlanArtifact> {
+    async plan(intent: VmIntent): Promise<PlanArtifact> {
       const planFile = path.join(planDir, intent.name, `${randomUUID()}.tfplan`);
       const { planJson, changes } = await savePlan(intent, planFile);
       return { planFile, planJson, summary: changes.length ? changes : ["no changes"] };

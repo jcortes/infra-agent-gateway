@@ -30,12 +30,15 @@ jobs:
         run: |
           curl -sSL https://github.com/open-policy-agent/conftest/releases/download/v0.71.1/conftest_0.71.1_Linux_x86_64.tar.gz | tar xz conftest
           sudo mv conftest /usr/local/bin/
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: iag
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm test:policy
       - run: tofu -chdir=terraform fmt -check
-      - name: Integration (real OpenTofu + Conftest + LocalStack)
+      - name: Integration (real OpenTofu + Conftest + LocalStack + kind)
         run: pnpm test test/integration.test.ts
         env:
           INTEGRATION: "1"

@@ -1,4 +1,4 @@
-import type { ChangeIntent } from "./intent.js";
+import type { ChangeIntent, VmIntent, WorkloadIntent } from "./intent.js";
 
 export type PlanArtifact = {
   /** Path to the saved plan, applied later exactly as reviewed. */
@@ -9,13 +9,20 @@ export type PlanArtifact = {
   summary: string[];
 };
 
-export interface Tofu {
-  plan(intent: ChangeIntent): Promise<PlanArtifact>;
+/** Turns an intent into a saved plan file and applies that exact file later. */
+export interface Backend<I> {
+  plan(intent: I): Promise<PlanArtifact>;
   readPlanBytes(planFile: string): Promise<string>;
   apply(planFile: string): Promise<{ output: string }>;
-  /** Re-plans `intent` against real infrastructure; read-only. */
-  detectDrift(intent: ChangeIntent): Promise<{ drifted: boolean; changes: string[] }>;
 }
+
+export interface Tofu extends Backend<VmIntent> {
+  /** Re-plans `intent` against real infrastructure; read-only. */
+  detectDrift(intent: VmIntent): Promise<{ drifted: boolean; changes: string[] }>;
+}
+
+/** Renders workload manifests and applies them with kubectl. */
+export type Kubernetes = Backend<WorkloadIntent>;
 
 export interface PolicyEngine {
   evaluate(planJson: unknown): Promise<{ violations: string[] }>;
@@ -58,6 +65,7 @@ export interface AuditLog {
 
 export type GatewayPorts = {
   tofu: Tofu;
+  kube: Kubernetes;
   policy: PolicyEngine;
   plans: PlanStore;
   audit: AuditLog;

@@ -23,12 +23,14 @@ flowchart LR
   S -- append --> L[(audit.jsonl)]
   H[Human] -- pnpm approve --> S
   S -- tofu apply planfile --> AWS[(AWS / LocalStack)]
+  S -- kubectl apply manifest --> K[(Kubernetes / kind)]
 ```
 
 | MCP tool | What it does |
 |---|---|
 | `plan_change` | Validates a structured intent (zod), runs `tofu plan -out`, evaluates the plan JSON with Conftest. Returns `planned` or `denied` with reasons. Changes nothing. |
 | `request_apply` | Moves a `planned` plan to `pending_approval`. Refuses denied plans. Applies nothing. |
+| `deploy_workload` | Renders a Deployment from a structured intent (image, replicas, namespace, limits), checks it with Conftest and, if compliant, leaves it `pending_approval`. Deploys nothing. |
 | `detect_drift` | Re-plans the last applied intent for a workspace (`tofu plan -detailed-exitcode`) and reports what changed outside the gateway. Read-only: fixing drift goes through `plan_change`. |
 | `get_audit_log` | Recent audit entries. |
 
@@ -40,8 +42,9 @@ There is no approve tool. See [ADR 0001](docs/adr/0001-agents-never-approve.md).
 |---|---|
 | Agent writes arbitrary infrastructure | Agents send a typed intent, never HCL; the module decides what gets built |
 | Unsafe config (open SSH, huge instances, missing owner, prod, deletes) | Rego policies in `policy/`, unit-tested with `conftest verify` |
+| Unsafe workloads (privileged, no cpu/memory limits, system namespaces) | Rego in `policy/k8s.rego`, checked against the rendered manifest |
 | Agent applies its own change | No approve tool; the gateway also rejects non-`human:` approvers |
-| Plan swapped or changed after review | sha256 of the plan file checked at apply; applies the saved plan, never re-plans ([ADR 0002](docs/adr/0002-apply-the-reviewed-plan-byte-for-byte.md)) |
+| Plan swapped or changed after review | sha256 of the plan file (or rendered manifest) checked at apply; applies the saved file, never re-plans ([ADR 0002](docs/adr/0002-apply-the-reviewed-plan-byte-for-byte.md)) |
 | No accountability | Append-only JSONL audit: who, what, plan id, policy result, approver, outcome |
 | Prompt injection via tool output | Output is data; AGENTS.md tells agents so, and no output can trigger an apply on its own |
 
@@ -49,15 +52,16 @@ There is no approve tool. See [ADR 0001](docs/adr/0001-agents-never-approve.md).
 
 ## Run it
 
-Needs Node 24, pnpm, OpenTofu, Conftest, Docker.
+Needs Node 24, pnpm, OpenTofu, Conftest, Docker, kind, kubectl.
 
 ```bash
 pnpm install
 docker run -d --name localstack -p 4566:4566 localstack/localstack:4   # free AWS emulator (newer tags need a license)
+kind create cluster --name iag    # the gateway only ever uses context kind-iag (override: KUBE_CONTEXT)
 
 pnpm test               # gateway + MCP seams (fast, no tools needed)
 pnpm test:policy        # Rego unit tests
-INTEGRATION=1 pnpm test test/integration.test.ts   # real OpenTofu + Conftest + LocalStack
+INTEGRATION=1 pnpm test test/integration.test.ts   # real OpenTofu + Conftest + LocalStack + kind
 ```
 
 Connect Claude Code:
@@ -70,4 +74,4 @@ Approve from another terminal: `pnpm approve <planId>`.
 
 ## Tests
 
-Written test-first at four seams: the gateway core (fakes only for the external CLIs), the MCP surface (a real MCP client over an in-memory transport), the policies (`conftest verify`), and an integration suite against real OpenTofu, Conftest and LocalStack.
+Written test-first at four seams: the gateway core (fakes only for the external CLIs), the MCP surface (a real MCP client over an in-memory transport), the policies (`conftest verify`), and an integration suite against real OpenTofu, Conftest, LocalStack and kind.

@@ -1,14 +1,19 @@
-// Real OpenTofu + Conftest. Apply additionally needs LocalStack:
+// Real OpenTofu + Conftest. Apply additionally needs LocalStack, workloads need kind:
 //   docker run -d --name localstack -p 4566:4566 localstack/localstack:4
+//   kind create cluster --name iag
 // Run with: INTEGRATION=1 pnpm test test/integration.test.ts
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { exec } from "../src/adapters/exec.js";
 import { createRealGateway } from "../src/config.js";
 
 const enabled = process.env.INTEGRATION === "1";
 const localstack = await fetch("http://localhost:4566/_localstack/health").then((r) => r.ok, () => false);
+const kubeContext = process.env.KUBE_CONTEXT ?? "kind-iag";
+const kubectl = (args: string[], input?: string) => exec("kubectl", ["--context", kubeContext, ...args], { input });
+const kind = enabled && (await kubectl(["get", "--raw", "/readyz"]).then(() => true, () => false));
 const unique = (base: string) => `${base}-${Date.now().toString(36)}`;
 
 /** Changes a VM behind OpenTofu's back, like someone clicking in the console. */
@@ -84,4 +89,41 @@ describe.skipIf(!enabled)("integration: real OpenTofu and Conftest", () => {
 
     expect(await gw.detectDrift(name, "agent:test")).toEqual({ name, drifted: true, changes: ["~ aws_instance.vm (t3.small)"] });
   }, 240_000);
+});
+
+describe.skipIf(!kind)("integration: real kubectl on kind", () => {
+  const gateway = async () => createRealGateway(await mkdtemp(path.join(tmpdir(), "iag-")));
+  const workload = { kind: "workload" as const, namespace: "team-apps", image: "nginx:1.27", replicas: 1, cpu: "100m", memory: "64Mi" };
+
+  it("deploys an approved workload and nothing before approval", async () => {
+    await kubectl(["apply", "-f", "-"], JSON.stringify({ apiVersion: "v1", kind: "Namespace", metadata: { name: "team-apps" } }));
+    const gw = await gateway();
+    const name = unique("web");
+    const planned = await gw.planChange({ ...workload, name }, "agent:test");
+    await gw.requestApply(planned.planId, "agent:test");
+    const before = await kubectl(["get", "deployment", name, "-n", "team-apps", "--ignore-not-found", "-o", "name"]);
+
+    const result = await gw.approve(planned.planId, "human:test");
+
+    expect(planned.summary).toEqual([`+ deployment/team-apps/${name} (nginx:1.27, 1 replicas)`]);
+    expect(before.stdout).toBe("");
+    expect(result.output).toBe(`deployment.apps/${name} created`);
+    const live = JSON.parse((await kubectl(["get", "deployment", name, "-n", "team-apps", "-o", "json"])).stdout);
+    expect(live.spec.template.spec.containers[0].resources.limits).toEqual({ cpu: "100m", memory: "64Mi" });
+  }, 120_000);
+
+  it("denies a privileged workload without limits outside the allowed namespaces", async () => {
+    const { status, violations } = await (await gateway()).planChange(
+      { kind: "workload", name: "root", namespace: "kube-system", image: "busybox", replicas: 1, privileged: true },
+      "agent:test",
+    );
+
+    expect(status).toBe("denied");
+    expect(violations.sort()).toEqual([
+      "deployment/kube-system/root: container root must not run privileged",
+      "deployment/kube-system/root: container root needs a cpu limit",
+      "deployment/kube-system/root: container root needs a memory limit",
+      "deployment/kube-system/root: namespace kube-system is not allowed (allowed: team-apps, team-data)",
+    ]);
+  }, 120_000);
 });

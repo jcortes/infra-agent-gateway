@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Gateway } from "./gateway.js";
-import { vmIntent } from "./intent.js";
+import { vmIntent, workloadIntent } from "./intent.js";
 
 const text = (value: unknown) => ({
   content: [{ type: "text" as const, text: typeof value === "string" ? value : JSON.stringify(value, null, 2) }],
@@ -34,6 +34,21 @@ export function createMcpServer(gateway: Gateway, options: { agentId: string }) 
       inputSchema: { planId: z.string() },
     },
     async ({ planId }) => text(await gateway.requestApply(planId, actor)),
+  );
+
+  server.registerTool(
+    "deploy_workload",
+    {
+      description:
+        "Deploy a container to Kubernetes from a structured intent. The gateway renders the Deployment and checks it against policy (no privileged containers, cpu and memory limits required, allowed namespaces only). A compliant workload waits as pending_approval until a human runs `pnpm approve <planId>`; nothing is deployed by this call.",
+      inputSchema: workloadIntent.omit({ kind: true }).shape,
+    },
+    async (args) => {
+      const planned = await gateway.planChange({ kind: "workload", ...args }, actor);
+      if (planned.status !== "planned") return text(planned);
+      const { status } = await gateway.requestApply(planned.planId, actor);
+      return text({ ...planned, status });
+    },
   );
 
   server.registerTool(

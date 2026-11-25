@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createConftest } from "./adapters/conftest.js";
+import { createKubectl } from "./adapters/kubectl.js";
 import { createFilePlanStore, createJsonlAuditLog } from "./adapters/files.js";
 import { createOpenTofu } from "./adapters/opentofu.js";
 import { createGateway } from "./gateway.js";
@@ -13,6 +14,10 @@ export function createRealGateway(stateDir = process.env.GATEWAY_STATE_DIR ?? pa
       moduleDir: path.join(root, "terraform"),
       planDir: path.join(stateDir, "tfplans"),
       awsEndpoint: process.env.AWS_ENDPOINT === "aws" ? null : process.env.AWS_ENDPOINT,
+    }),
+    kube: createKubectl({
+      context: process.env.KUBE_CONTEXT ?? "kind-iag",
+      planDir: path.join(stateDir, "manifests"),
     }),
     policy: createConftest({ policyDir: path.join(root, "policy") }),
     plans: createFilePlanStore(path.join(stateDir, "plans")),

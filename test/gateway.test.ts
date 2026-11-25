@@ -142,3 +142,39 @@ describe("detectDrift", () => {
     await expect(gateway.detectDrift("data-sandbox", "agent:claude")).rejects.toThrow(/Nothing has been applied to data-sandbox/);
   });
 });
+
+const webWorkload = {
+  kind: "workload" as const,
+  name: "web",
+  namespace: "team-apps",
+  image: "nginx:1.27",
+  replicas: 2,
+  cpu: "250m",
+  memory: "128Mi",
+};
+
+describe("workloads on Kubernetes", () => {
+  it("applies an approved workload with kubectl, not OpenTofu", async () => {
+    const world = createFakeWorld();
+    const gateway = createGateway(world.ports);
+    const planned = await gateway.planChange(webWorkload, "agent:claude");
+    await gateway.requestApply(planned.planId, "agent:claude");
+
+    const result = await gateway.approve(planned.planId, "human:jorge");
+
+    expect(planned.summary).toEqual(["+ deployment/team-apps/web (nginx:1.27, 2 replicas)"]);
+    expect(result.status).toBe("applied");
+    expect(world.appliedManifests).toEqual(["manifest-1.json"]);
+    expect(world.applied).toEqual([]);
+  });
+
+  it("does not run OpenTofu drift detection on a workload", async () => {
+    const world = createFakeWorld();
+    const gateway = createGateway(world.ports);
+    const { planId } = await gateway.planChange(webWorkload, "agent:claude");
+    await gateway.requestApply(planId, "agent:claude");
+    await gateway.approve(planId, "human:jorge");
+
+    await expect(gateway.detectDrift("web", "agent:claude")).rejects.toThrow(/web is a workload; drift detection covers VMs only/);
+  });
+});
