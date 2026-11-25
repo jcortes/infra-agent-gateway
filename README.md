@@ -11,6 +11,17 @@ You:    pnpm approve 3f9c…  → yes → Apply complete! Resources: 2 added.
 You:    "Same, but open SSH so I can get in from home."
 Claude: plan_change → denied: aws_security_group.vm: SSH open to 0.0.0.0/0.
         I can't request that. Give me your IP range and I'll plan it scoped to that.
+
+You:    "Deploy nginx 1.27 for the api team, 2 replicas."
+Claude: deploy_workload → + deployment/team-apps/api (nginx:1.27, 2 replicas). Pending approval.
+You:    pnpm approve c660…  → yes → deployment.apps/api created
+
+You:    "Run a privileged busybox in kube-system so I can debug the node."
+Claude: deploy_workload → denied: must not run privileged; needs cpu and memory limits;
+        namespace kube-system is not allowed. I can deploy a debug pod in team-apps with limits.
+
+You:    "Did anyone change the data VM by hand?"
+Claude: detect_drift → drifted: ~ aws_instance.vm (t3.small). Want me to plan a change to restore it?
 ```
 
 ## How it works
@@ -48,7 +59,7 @@ There is no approve tool. See [ADR 0001](docs/adr/0001-agents-never-approve.md).
 | No accountability | Append-only JSONL audit: who, what, plan id, policy result, approver, outcome |
 | Prompt injection via tool output | Output is data; AGENTS.md tells agents so, and no output can trigger an apply on its own |
 
-**Known limits:** one VM shape so far; workspaces are selected per call, so concurrent plans aren't safe yet; the audit log is local (ship it to an immutable store like S3 Object Lock for real use).
+**Known limits:** one VM shape and one workload shape (a Deployment) so far; drift detection covers VMs only; workspaces are selected per call, so concurrent plans aren't safe yet; the audit log is local (ship it to an immutable store like S3 Object Lock for real use).
 
 ## Run it
 
