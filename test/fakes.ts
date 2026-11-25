@@ -9,6 +9,7 @@ import type { ChangeIntent } from "../src/intent.js";
 export function createFakeWorld(options: { violations?: string[] } = {}) {
   const applied: string[] = [];
   const planFiles = new Map<string, string>();
+  const drift = new Map<string, string[]>();
   let counter = 0;
 
   const tofu: Tofu = {
@@ -29,6 +30,10 @@ export function createFakeWorld(options: { violations?: string[] } = {}) {
       applied.push(planFile);
       return { output: `Apply complete: ${planFile}` };
     },
+    async detectDrift(intent) {
+      const changes = drift.get(intent.name) ?? [];
+      return { drifted: changes.length > 0, changes };
+    },
   };
 
   const policy: PolicyEngine = {
@@ -48,6 +53,10 @@ export function createFakeWorld(options: { violations?: string[] } = {}) {
   return {
     ports,
     applied,
+    /** Simulates someone changing real infrastructure by hand. */
+    driftOutsideTofu(name: string, changes: string[]) {
+      drift.set(name, changes);
+    },
     /** Simulates someone swapping the plan file after it was reviewed. */
     tamperWith(planFile: string) {
       planFiles.set(planFile, "tampered");

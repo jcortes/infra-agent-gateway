@@ -66,10 +66,26 @@ export function createGateway(ports: GatewayPorts) {
 
       const { output } = await tofu.apply(record.planFile);
       record.status = "applied";
+      record.appliedAt = now().toISOString();
       await plans.save(record);
       await audit.append({ at: now().toISOString(), action: "approve", actor: approver, planId, outcome: record.status, detail: { output } });
 
       return { planId, status: record.status, output };
+    },
+
+    async detectDrift(name: string, actor: string) {
+      const applied = await plans.latestApplied(name);
+      if (!applied) throw new Error(`Nothing has been applied to ${name}, so there is no drift to detect`);
+      const { drifted, changes } = await tofu.detectDrift(applied.intent);
+      await audit.append({
+        at: now().toISOString(),
+        action: "detect_drift",
+        actor,
+        planId: applied.planId,
+        outcome: drifted ? "drifted" : "in_sync",
+        detail: { changes },
+      });
+      return { name, drifted, changes };
     },
 
     async getPlan(planId: string) {

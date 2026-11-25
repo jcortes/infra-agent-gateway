@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { ChangeIntent } from "../intent.js";
@@ -12,7 +12,7 @@ const symbol: Record<string, string> = { create: "+", delete: "-", update: "~", 
 /** Runs the `tofu` CLI against `moduleDir`, one workspace per intent name. */
 export function createOpenTofu(options: { moduleDir: string; planDir: string; awsEndpoint?: string | null }): Tofu {
   const { moduleDir, planDir } = options;
-  const tofu = (args: string[]) => exec("tofu", args, { cwd: moduleDir });
+  const tofu = (args: string[], okExitCodes?: number[]) => exec("tofu", args, { cwd: moduleDir, okExitCodes });
   let initialized: Promise<unknown> | undefined;
 
   const selectWorkspace = async (name: string) => {
@@ -20,39 +20,55 @@ export function createOpenTofu(options: { moduleDir: string; planDir: string; aw
     await tofu(["workspace", "select", "-or-create", name]);
   };
 
+  const varArgs = (intent: ChangeIntent) => {
+    const vars: Record<string, string | undefined> = {
+      name: intent.name,
+      environment: intent.environment,
+      instance_type: intent.instanceType,
+      owner: intent.owner,
+      ssh_cidr: intent.sshCidr,
+    };
+    const args = Object.entries(vars)
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => `-var=${k}=${v}`);
+    if (options.awsEndpoint === null) args.push("-var=aws_endpoint=null");
+    else if (options.awsEndpoint) args.push(`-var=aws_endpoint=${options.awsEndpoint}`);
+    return args;
+  };
+
+  /** Saves a plan to `planFile`; returns its JSON, its changes and tofu's exit code. */
+  const savePlan = async (intent: ChangeIntent, planFile: string, extraArgs: string[] = []) => {
+    await selectWorkspace(intent.name);
+    await mkdir(path.dirname(planFile), { recursive: true });
+    const { code } = await tofu(["plan", "-input=false", "-no-color", `-out=${planFile}`, ...extraArgs, ...varArgs(intent)], [2]);
+    const { stdout } = await tofu(["show", "-json", planFile]);
+    const planJson = JSON.parse(stdout) as { resource_changes?: ResourceChange[] };
+    const changes = (planJson.resource_changes ?? [])
+      .filter((rc) => !rc.change.actions.includes("no-op"))
+      .map((rc) => {
+        const action = rc.change.actions.map((a) => symbol[a] ?? a).join("/");
+        const type = rc.change.after?.instance_type;
+        return `${action} ${rc.address}${type ? ` (${type})` : ""}`;
+      });
+    return { planJson, changes, code };
+  };
+
   return {
     async plan(intent: ChangeIntent): Promise<PlanArtifact> {
-      await selectWorkspace(intent.name);
-      const dir = path.join(planDir, intent.name);
-      await mkdir(dir, { recursive: true });
-      const planFile = path.join(dir, `${randomUUID()}.tfplan`);
+      const planFile = path.join(planDir, intent.name, `${randomUUID()}.tfplan`);
+      const { planJson, changes } = await savePlan(intent, planFile);
+      return { planFile, planJson, summary: changes.length ? changes : ["no changes"] };
+    },
 
-      const vars: Record<string, string | undefined> = {
-        name: intent.name,
-        environment: intent.environment,
-        instance_type: intent.instanceType,
-        owner: intent.owner,
-        ssh_cidr: intent.sshCidr,
-      };
-      const varArgs = Object.entries(vars)
-        .filter(([, v]) => v !== undefined)
-        .map(([k, v]) => `-var=${k}=${v}`);
-      if (options.awsEndpoint === null) varArgs.push("-var=aws_endpoint=null");
-      else if (options.awsEndpoint) varArgs.push(`-var=aws_endpoint=${options.awsEndpoint}`);
-
-      await tofu(["plan", "-input=false", "-no-color", `-out=${planFile}`, ...varArgs]);
-      const { stdout } = await tofu(["show", "-json", planFile]);
-      const planJson = JSON.parse(stdout) as { resource_changes?: ResourceChange[] };
-
-      const summary = (planJson.resource_changes ?? [])
-        .filter((rc) => !rc.change.actions.includes("no-op"))
-        .map((rc) => {
-          const action = rc.change.actions.map((a) => symbol[a] ?? a).join("/");
-          const type = rc.change.after?.instance_type;
-          return `${action} ${rc.address}${type ? ` (${type})` : ""}`;
-        });
-
-      return { planFile, planJson, summary: summary.length ? summary : ["no changes"] };
+    async detectDrift(intent) {
+      // Never applied: lives outside the reviewed-plan directory.
+      const planFile = path.join(planDir, ".drift", `${randomUUID()}.tfplan`);
+      try {
+        const { changes, code } = await savePlan(intent, planFile, ["-detailed-exitcode"]);
+        return { drifted: code === 2, changes };
+      } finally {
+        await rm(planFile, { force: true });
+      }
     },
 
     async readPlanBytes(planFile) {

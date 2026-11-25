@@ -37,6 +37,17 @@ export function createMcpServer(gateway: Gateway, options: { agentId: string }) 
   );
 
   server.registerTool(
+    "detect_drift",
+    {
+      description:
+        "Check whether the real infrastructure for a workspace still matches the last applied plan. Read-only: reports what changed outside the gateway, never fixes it. To fix drift, call plan_change.",
+      inputSchema: { name: vmIntent.shape.name },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ name }) => text(await gateway.detectDrift(name, actor)),
+  );
+
+  server.registerTool(
     "get_audit_log",
     {
       description: "Read the most recent audit log entries.",

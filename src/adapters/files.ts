@@ -1,6 +1,7 @@
-import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AuditEntry, AuditLog, PlanRecord, PlanStore } from "../ports.js";
+import { newestApplied } from "./memory.js";
 
 /** Plans persist on disk because `pnpm approve` runs in a separate process. */
 export function createFilePlanStore(dir: string): PlanStore {
@@ -18,6 +19,13 @@ export function createFilePlanStore(dir: string): PlanStore {
       } catch {
         return undefined;
       }
+    },
+    async latestApplied(name) {
+      const files = await readdir(dir).catch(() => [] as string[]);
+      const records = await Promise.all(
+        files.filter((f) => f.endsWith(".json")).map(async (f) => JSON.parse(await readFile(path.join(dir, f), "utf8")) as PlanRecord),
+      );
+      return newestApplied(records, name);
     },
   };
 }

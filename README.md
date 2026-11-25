@@ -29,6 +29,7 @@ flowchart LR
 |---|---|
 | `plan_change` | Validates a structured intent (zod), runs `tofu plan -out`, evaluates the plan JSON with Conftest. Returns `planned` or `denied` with reasons. Changes nothing. |
 | `request_apply` | Moves a `planned` plan to `pending_approval`. Refuses denied plans. Applies nothing. |
+| `detect_drift` | Re-plans the last applied intent for a workspace (`tofu plan -detailed-exitcode`) and reports what changed outside the gateway. Read-only: fixing drift goes through `plan_change`. |
 | `get_audit_log` | Recent audit entries. |
 
 There is no approve tool. See [ADR 0001](docs/adr/0001-agents-never-approve.md).

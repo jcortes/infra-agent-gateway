@@ -13,6 +13,8 @@ export interface Tofu {
   plan(intent: ChangeIntent): Promise<PlanArtifact>;
   readPlanBytes(planFile: string): Promise<string>;
   apply(planFile: string): Promise<{ output: string }>;
+  /** Re-plans `intent` against real infrastructure; read-only. */
+  detectDrift(intent: ChangeIntent): Promise<{ drifted: boolean; changes: string[] }>;
 }
 
 export interface PolicyEngine {
@@ -30,11 +32,14 @@ export type PlanRecord = {
   violations: string[];
   status: PlanStatus;
   requestedBy: string;
+  appliedAt?: string;
 };
 
 export interface PlanStore {
   save(record: PlanRecord): Promise<void>;
   get(planId: string): Promise<PlanRecord | undefined>;
+  /** The most recently applied plan for workspace `name`. */
+  latestApplied(name: string): Promise<PlanRecord | undefined>;
 }
 
 export type AuditEntry = {

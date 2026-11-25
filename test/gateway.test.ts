@@ -101,3 +101,44 @@ describe("approval guardrails", () => {
     expect(world.applied).toEqual([]);
   });
 });
+
+describe("detectDrift", () => {
+  it("reports drift between the last applied intent and the real infrastructure", async () => {
+    const world = createFakeWorld();
+    const gateway = createGateway(world.ports);
+    const { planId } = await gateway.planChange(devVm, "agent:claude");
+    await gateway.requestApply(planId, "agent:claude");
+    await gateway.approve(planId, "human:jorge");
+    world.driftOutsideTofu("data-sandbox", ["~ aws_instance.vm (t3.small)"]);
+
+    const result = await gateway.detectDrift("data-sandbox", "agent:claude");
+
+    expect(result).toEqual({ name: "data-sandbox", drifted: true, changes: ["~ aws_instance.vm (t3.small)"] });
+  });
+
+  it("records each drift check in the audit log", async () => {
+    const world = createFakeWorld();
+    const gateway = createGateway(world.ports);
+    const { planId } = await gateway.planChange(devVm, "agent:claude");
+    await gateway.requestApply(planId, "agent:claude");
+    await gateway.approve(planId, "human:jorge");
+
+    await gateway.detectDrift("data-sandbox", "agent:claude");
+
+    expect((await world.ports.audit.list()).at(-1)).toMatchObject({
+      action: "detect_drift",
+      actor: "agent:claude",
+      planId,
+      outcome: "in_sync",
+    });
+  });
+
+  it("refuses to check a workspace with nothing applied, even if plans are pending", async () => {
+    const world = createFakeWorld();
+    const gateway = createGateway(world.ports);
+    const { planId } = await gateway.planChange(devVm, "agent:claude");
+    await gateway.requestApply(planId, "agent:claude");
+
+    await expect(gateway.detectDrift("data-sandbox", "agent:claude")).rejects.toThrow(/Nothing has been applied to data-sandbox/);
+  });
+});
