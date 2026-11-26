@@ -2,6 +2,8 @@
 
 An MCP server that lets AI agents like Claude **plan** infrastructure changes and **request** them, while every apply goes through policy as code, a human approval and an append-only audit log.
 
+![Claude plans a VM and a Kubernetes workload through the gateway; a human approves each one in a second terminal, and policy denies open SSH and a privileged container](docs/demo.gif)
+
 ```
 You:    "I need a small VM for the data team in dev."
 Claude: plan_change → + aws_security_group.vm, + aws_instance.vm (t3.small). Policies passed.
